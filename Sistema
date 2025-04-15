@@ -1,0 +1,117 @@
+#!/bin/bash
+
+# Script para coletar informações básicas do sistema sem inxi ou lshw
+
+echo "=================================================="
+echo "       Relatório Básico de Sistema        "
+echo "=================================================="
+echo "Data: $(date)"
+
+# --- Sistema Operacional ---
+echo -e "\n--- Sistema Operacional ---"
+if [ -f /etc/os-release ]; then
+    # Tenta obter o nome "bonito" da distro
+    grep PRETTY_NAME /etc/os-release | cut -d'=' -f2 | tr -d '"' || uname -sv
+else
+    # Fallback para informações do kernel/sistema
+    uname -svrm
+fi
+echo "Kernel: $(uname -r)"
+echo "Arquitetura: $(uname -m)"
+echo "Hostname: $(hostname)"
+
+# --- Hardware Principal (via /sys/devices/virtual/dmi/id/) ---
+# Esta é a melhor fonte para modelo/fabricante sem dmidecode/lshw
+# Geralmente NÃO precisa de sudo para ler estes arquivos
+DMI_PATH="/sys/devices/virtual/dmi/id"
+echo -e "\n--- Hardware Principal (via /sys) ---"
+if [ -d "$DMI_PATH" ] && [ "$(ls -A $DMI_PATH)" ]; then
+    echo "Fabricante do Sistema: $(cat ${DMI_PATH}/sys_vendor 2>/dev/null || echo 'N/Disponível')"
+    echo "Modelo/Produto.....: $(cat ${DMI_PATH}/product_name 2>/dev/null || echo 'N/Disponível')"
+    echo "Versão do Produto..: $(cat ${DMI_PATH}/product_version 2>/dev/null || echo 'N/Disponível')"
+    # Número de série pode exigir root em alguns sistemas/configurações
+    echo "Serial do Sistema..: $(cat ${DMI_PATH}/product_serial 2>/dev/null || echo 'N/Disponível ou Requer Root')"
+    echo "----------------------------------------"
+    echo "Fabricante Placa-Mãe: $(cat ${DMI_PATH}/board_vendor 2>/dev/null || echo 'N/Disponível')"
+    echo "Nome Placa-Mãe.....: $(cat ${DMI_PATH}/board_name 2>/dev/null || echo 'N/Disponível')"
+    echo "Versão Placa-Mãe...: $(cat ${DMI_PATH}/board_version 2>/dev/null || echo 'N/Disponível')"
+    echo "----------------------------------------"
+    echo "Fabricante BIOS....: $(cat ${DMI_PATH}/bios_vendor 2>/dev/null || echo 'N/Disponível')"
+    echo "Versão BIOS........: $(cat ${DMI_PATH}/bios_version 2>/dev/null || echo 'N/Disponível')"
+    echo "Data BIOS..........: $(cat ${DMI_PATH}/bios_date 2>/dev/null || echo 'N/Disponível')"
+else
+    echo "Informações DMI via /sys não disponíveis ou vazias."
+    echo "Modelo/Fabricante pode não ser detectável sem 'lshw' ou 'dmidecode'."
+fi
+
+# --- CPU ---
+echo -e "\n--- Processador (CPU) ---"
+if command -v lscpu &> /dev/null; then
+    # lscpu fornece um bom resumo
+    lscpu | grep -E '^Arquitetura|^Architecture|^CPU\(s\)|On-line CPU|Thread|Core\(s)|Soquete|Vendor ID|Model name:'
+elif [ -f /proc/cpuinfo ]; then
+    # Fallback para /proc/cpuinfo se lscpu não estiver disponível
+    echo "Modelo.....: $(grep 'model name' /proc/cpuinfo | uniq | cut -d':' -f2- | sed 's/^[ \t]*//')"
+    echo "Fabricante.: $(grep 'vendor_id' /proc/cpuinfo | uniq | cut -d':' -f2- | sed 's/^[ \t]*//')"
+    echo "Núcleos....: $(grep 'cpu cores' /proc/cpuinfo | uniq | cut -d':' -f2- | sed 's/^[ \t]*//')"
+    echo "Threads....: $(grep 'siblings' /proc/cpuinfo | uniq | cut -d':' -f2- | sed 's/^[ \t]*//')"
+else
+    echo "Informações de CPU não encontradas (/proc/cpuinfo ou lscpu)."
+fi
+
+# --- Memória (RAM) ---
+echo -e "\n--- Memória RAM ---"
+if [ -f /proc/meminfo ]; then
+    # Mostra memória total
+    grep MemTotal /proc/meminfo
+    # Tenta mostrar uso atual se o comando 'free' existir
+    if command -v free &> /dev/null; then
+        free -h | grep Mem:
+    fi
+else
+    echo "Informações de Memória não encontradas (/proc/meminfo)."
+fi
+echo "(Detalhes dos pentes como fabricante/velocidade geralmente requerem 'sudo dmidecode')"
+
+# --- Discos / Armazenamento ---
+echo -e "\n--- Discos e Partições ---"
+if command -v lsblk &> /dev/null; then
+    # lsblk é a melhor opção moderna se disponível
+    lsblk -o NAME,MODEL,VENDOR,SIZE,TYPE,MOUNTPOINT
+elif [ -f /proc/partitions ]; then
+    # Fallback para /proc/partitions (menos informativo)
+    echo "Dispositivo  Blocos     Nome"
+    cat /proc/partitions | tail -n +2 # tail remove cabeçalho
+else
+    echo "Informações de disco não encontradas (lsblk ou /proc/partitions)."
+fi
+echo "(Use 'df -h' para ver espaço usado/livre nos sistemas de arquivos montados)"
+
+# --- Rede ---
+echo -e "\n--- Interfaces de Rede ---"
+if command -v ip &> /dev/null; then
+    ip -brief address show
+    echo "--- Dispositivos de Rede PCI/USB (se lspci/lsusb disponíveis) ---"
+    if command -v lspci &> /dev/null; then
+        lspci | grep -i -E 'ethernet|network|wireless' || true # Lista dispositivos PCI
+    fi
+    if command -v lsusb &> /dev/null; then
+        lsusb | grep -i -E 'ethernet|network|wireless|wlan|wifi' || true # Tenta encontrar adaptadores USB
+    fi
+else
+    echo "Informações de rede requerem o comando 'ip' (pacote iproute2)."
+    # Fallback para ifconfig se 'ip' não existir? ifconfig é obsoleto.
+fi
+
+
+# --- Dispositivos PCI (Ex: Gráficos) ---
+echo -e "\n--- Dispositivos PCI Importantes ---"
+if command -v lspci &> /dev/null; then
+    lspci | grep -i -E 'VGA|3D|Display|Audio|Sound|Ethernet|Wireless|Network|SATA|IDE|NVMe|USB Controller'
+else
+    echo "Informações de dispositivos PCI requerem 'lspci' (pacote pciutils)."
+fi
+
+echo -e "\n=================================================="
+echo "            Fim do Relatório            "
+echo "=================================================="
