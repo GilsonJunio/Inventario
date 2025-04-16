@@ -1,48 +1,42 @@
 <#
 .SYNOPSIS
-   Coleta informações detalhadas do sistema Windows e salva no arquivo RelatorioDoSistema.txt na pasta Downloads.
+   Coleta informações essenciais de hardware do sistema Windows e salva na pasta Downloads.
 .DESCRIPTION
-   Este script PowerShell usa Get-CimInstance para consultar informações de hardware
-   e software. Ele inicia um log (transcript) para salvar toda a saída
-   no arquivo "RelatorioDoSistema.txt" na pasta Downloads do usuário atual.
+   Este script PowerShell foca nos componentes principais (Sistema, OS, CPU, RAM,
+   Placa-mãe, GPU, Discos Físicos), ignorando detalhes de partições lógicas e
+   configurações de rede. Salva a saída em "RelatorioDoSistema.txt" na pasta Downloads.
    O arquivo será sobrescrito a cada execução. Assume que a pasta Downloads existe.
 .NOTES
    Autor: Gemini (adaptado para Português)
-   Data: 15 de Abril de 2025 - 21:43 (Parnaíba, Piauí)
+   Data: 15 de Abril de 2025 - 21:47 (Parnaíba, Piauí)
    Requer: PowerShell
-   Nota: Recomenda-se executar como Administrador para obter detalhes máximos.
+   Nota: Recomenda-se executar como Administrador para obter detalhes máximos
+         (como números de série).
 #>
 
 # --- Configuração do Arquivo de Saída ---
-# Define o nome FIXO do arquivo de log
 $logFileName = "RelatorioDoSistema.txt"
-# Define o caminho completo na pasta Downloads do usuário atual ($HOME é o diretório pessoal)
 $logPath = Join-Path -Path $HOME -ChildPath "Downloads\$logFileName"
 
 # --- Inicia o Log (Transcript) ---
 try {
-    # Inicia a gravação no arquivo especificado.
-    # -Force vai sobrescrever o arquivo se ele já existir!
-    # Se a pasta Downloads não existir, Start-Transcript falhará e o catch tratará.
     Start-Transcript -Path $logPath -Force -ErrorAction Stop
     Write-Host "Iniciando gravação do relatório em: $logPath" -ForegroundColor Green
     Write-Host "*** ATENÇÃO: Este arquivo será sobrescrito se já existir! ***" -ForegroundColor Yellow
     Write-Host ""
 
 } catch {
-    # Mensagem de erro agora cobre falha ao iniciar por qualquer motivo (permissão, pasta inexistente, etc.)
     Write-Error "ERRO CRÍTICO: Não foi possível iniciar o log em '$logPath'. Verifique as permissões e se a pasta Downloads (`$($HOME)\Downloads`) existe. Detalhes: $($_.Exception.Message)"
-    # Tenta parar caso tenha iniciado parcialmente
     try { Stop-Transcript -ErrorAction SilentlyContinue } catch {}
-    exit 1 # Sai se não conseguir logar
+    exit 1
 }
 
-# --- Corpo Principal do Script (Tudo aqui será logado E exibido no console) ---
+# --- Corpo Principal do Script ---
 try {
 
     # Cabeçalho do Relatório
     Write-Host "==================================================" -ForegroundColor Yellow
-    Write-Host "       Relatório de Informações do Sistema        " -ForegroundColor Yellow
+    Write-Host "     Relatório de Componentes Principais do Sistema     " -ForegroundColor Yellow
     Write-Host "==================================================" -ForegroundColor Yellow
     Write-Host "Data e Hora da Coleta: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     Write-Host ""
@@ -60,9 +54,9 @@ try {
         Write-Host "Versão do SO          : $($os.Version)"
         Write-Host "Build do SO           : $($os.BuildNumber)"
         Write-Host "Arquitetura do SO     : $($os.OSArchitecture)"
-        Write-Host "Idioma do SO          : $($os.OSLanguage)"
+        # Write-Host "Idioma do SO          : $($os.OSLanguage)" # Removido por ser menos essencial
         $installDate = try { [Management.ManagementDateTimeConverter]::ToDateTime($os.InstallDate).ToString('yyyy-MM-dd HH:mm:ss') } catch { "Data Inválida" }
-        Write-Host "Data de Instalação    : $installDate"
+        # Write-Host "Data de Instalação    : $installDate" # Removido por ser menos essencial
 
         $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
         $totalRamGB = [Math]::Round($cs.TotalPhysicalMemory / 1GB, 2)
@@ -109,8 +103,8 @@ try {
             Write-Host "   Núcleos Físicos       : $($cpu.NumberOfCores)"
             Write-Host "   Processadores Lógicos : $($cpu.NumberOfLogicalProcessors)"
             Write-Host "   Soquete               : $($cpu.SocketDesignation)"
-            Write-Host "   Cache L2 (KB)         : $($cpu.L2CacheSize)"
-            Write-Host "   Cache L3 (KB)         : $($cpu.L3CacheSize)"
+            # Write-Host "   Cache L2 (KB)         : $($cpu.L2CacheSize)" # Removido por ser detalhe extra
+            # Write-Host "   Cache L3 (KB)         : $($cpu.L3CacheSize)" # Removido por ser detalhe extra
             $cpuIndex++
         }
     } catch {
@@ -133,3 +127,18 @@ try {
                 Write-Host "   Part Number : $($module.PartNumber)"
                 Write-Host "   Serial      : $($module.SerialNumber) (Requer Admin)"
                 Write-Host "   Tipo        : $($module.MemoryType)"
+                $i++
+            }
+        } else {
+            Write-Host "Nenhum módulo de memória física encontrado."
+        }
+    } catch {
+        Write-Warning "AVISO ao obter detalhes dos pentes de RAM: $($_.Exception.Message)"
+    }
+    Write-Host ""
+
+    # --- Placa de Vídeo (GPU) ---
+    Write-Host "--- Placa de Vídeo (GPU) ---" -ForegroundColor Cyan
+    try {
+        $gpus = Get-CimInstance Win32_VideoController -ErrorAction Stop
+        if ($gpus) {
